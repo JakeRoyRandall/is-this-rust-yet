@@ -1,19 +1,11 @@
 # Is This Rust Yet?
 
-Created September 2026 as a retrospective exercise, not historical 2020 work. This increment keeps the core report and adds `--json`, a `--check` CI gate, and unit tests.
+A small humorous source-text inspector. Created in September 2026 as retrospective calendar artwork; this is not historical work from 2020.
 
-Run without Cargo or dependencies:
+Build with `rustc --edition 2021 main.rs -o is-this-rust-yet`. Run `./is-this-rust-yet [--json] [--check] [--max-todos N] [FILE|-]`. Without a file, it reads stdin.
 
-```sh
-rustc --edition=2021 main.rs -o /tmp/is-this-rust-yet-feature
-printf 'fn main() {}\n' | /tmp/is-this-rust-yet-feature --json -
-rustc --edition=2021 --test main.rs -o /tmp/is-this-rust-yet-feature-tests
-/tmp/is-this-rust-yet-feature-tests
-sh cli_test.sh
-```
+`--check` exits 1 when no function marker is found or TODOs exceed the allowance (zero by default). `--max-todos N` requires `--check` and accepts 0 through 1,000,000. Reports retain actual counts. Argument/read errors exit 2.
 
-`--check` exits 1 if the text has no `fn` or has any `TODO`. These are literal text matches, not parsing or compilation.
+This is literal text matching, not Rust parsing, compilation, static analysis, or a security assessment. Counts may include comments and strings. Byte counts are UTF-8 bytes.
 
-Flags may be combined and used in either order with one input path or `-`. Exit codes: 0 for successful reporting/check, 1 for a failed text check, 2 for usage or read errors. Counts include comments and strings; UTF-8 bytes and Rust `str::lines` line semantics are used. No compiler, safety, or performance claims.
-
-Git author dates are deliberately assigned for calendar artwork; actual creation was September 2026 and committer timestamps record that creation.
+Run unit tests with `rustc --edition 2021 --test main.rs -o /tmp/rust-yet-tests && /tmp/rust-yet-tests`.
