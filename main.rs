@@ -21,6 +21,7 @@ struct Config {
     check: bool,
     input: Option<String>,
     max_todos: Option<usize>,
+    max_unwraps: Option<usize>,
     show_todos: bool,
 }
 
@@ -66,7 +67,8 @@ fn main() {
         }
     }
     let todo_limit = config.max_todos.unwrap_or(0);
-    if config.check && (r.functions == 0 || r.todos > todo_limit) {
+    let unwrap_limit = config.max_unwraps.unwrap_or(usize::MAX);
+    if config.check && (r.functions == 0 || r.todos > todo_limit || r.unwraps > unwrap_limit) {
         std::process::exit(1);
     }
 }
@@ -88,13 +90,14 @@ fn print_help() {
     );
 }
 fn usage() -> &'static str {
-    "usage: is-this-rust-yet [--json] [--check] [--max-todos N] [--show-todos] [FILE|-]"
+    "usage: is-this-rust-yet [--json] [--check] [--max-todos N] [--max-unwraps N] [--show-todos] [FILE|-]"
 }
 fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut json = false;
     let mut check = false;
     let mut input = None;
     let mut max_todos = None;
+    let mut max_unwraps = None;
     let mut show_todos = false;
     let mut i = 0;
     while i < args.len() {
@@ -115,6 +118,14 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
                 if limit > 1_000_000 { return Err("--max-todos must be an integer from 0 to 1000000".into()); }
                 max_todos = Some(limit);
             }
+            "--max-unwraps" => {
+                i += 1;
+                if i == args.len() { return Err("--max-unwraps requires N".into()); }
+                let value = &args[i];
+                let limit = value.parse::<usize>().map_err(|_| "--max-unwraps must be an integer from 0 to 1000000")?;
+                if limit > 1_000_000 { return Err("--max-unwraps must be an integer from 0 to 1000000".into()); }
+                max_unwraps = Some(limit);
+            }
             "-" => {
                 if input.is_some() {
                     return Err("more than one input: -".into());
@@ -128,7 +139,8 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         i += 1;
     }
     if max_todos.is_some() && !check { return Err("--max-todos requires --check".into()); }
-    Ok(Config { json, check, input, max_todos, show_todos })
+    if max_unwraps.is_some() && !check { return Err("--max-unwraps requires --check".into()); }
+    Ok(Config { json, check, input, max_todos, max_unwraps, show_todos })
 }
 fn mark(ok: bool) -> &'static str {
     if ok {
@@ -201,7 +213,7 @@ mod tests {
         let args = vec!["file.rs".into(), "--check".into(), "--json".into()];
         assert_eq!(
             parse_args(&args).unwrap(),
-            Config { json: true, check: true, input: Some("file.rs".into()), max_todos: None, show_todos: false }
+            Config { json: true, check: true, input: Some("file.rs".into()), max_todos: None, max_unwraps: None, show_todos: false }
         );
     }
     #[test]
@@ -216,6 +228,14 @@ mod tests {
         assert!(parse_args(&["--max-todos".into(), "2".into()]).is_err());
         assert!(parse_args(&["--check".into(), "--max-todos".into(), "1000001".into()]).is_err());
         assert!(parse_args(&["--check".into(), "--max-todos".into(), "-1".into()]).is_err());
+    }
+    #[test]
+    fn max_unwraps_requires_check_and_is_bounded() {
+        let args = vec!["--check".into(), "--max-unwraps".into(), "2".into()];
+        assert_eq!(parse_args(&args).unwrap().max_unwraps, Some(2));
+        assert!(parse_args(&["--max-unwraps".into(), "2".into()]).is_err());
+        assert!(parse_args(&["--check".into(), "--max-unwraps".into(), "1000001".into()]).is_err());
+        assert!(parse_args(&["--check".into(), "--max-unwraps".into(), "-1".into()]).is_err());
     }
     #[test]
     fn max_todos_allows_threshold_but_still_requires_function() {
