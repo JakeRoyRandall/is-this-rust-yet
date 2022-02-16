@@ -9,3 +9,5 @@ Build with `rustc --edition 2021 main.rs -o is-this-rust-yet`. Run `./is-this-ru
 This is literal text matching, not Rust parsing, compilation, static analysis, or a security assessment. Counts may include comments and strings. Byte counts are UTF-8 bytes.
 
 Run unit tests with `rustc --edition 2021 --test main.rs -o /tmp/rust-yet-tests && /tmp/rust-yet-tests`.
+
+Input from a file or stdin must be valid UTF-8 and at most 1,048,576 bytes (1 MiB). The reader consumes at most the limit plus one byte; oversized or malformed input exits with status 2.

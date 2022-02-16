@@ -3,6 +3,8 @@ use std::{
     io::{self, Read},
 };
 
+const MAX_INPUT_BYTES: usize = 1_048_576;
+
 #[derive(Debug, PartialEq)]
 struct Report {
     bytes: usize,
@@ -30,18 +32,17 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let mut source = String::new();
-    let read_result = match config.input.as_deref() {
-        None | Some("-") => io::stdin().read_to_string(&mut source),
-        Some(path) => fs::read_to_string(path).map(|text| {
-            source = text;
-            0
-        }),
+    let source = match config.input.as_deref() {
+        None | Some("-") => read_limited(io::stdin()),
+        Some(path) => fs::File::open(path).map_err(|error| error.to_string()).and_then(read_limited),
     };
-    if let Err(error) = read_result {
-        eprintln!("error: {error}");
-        std::process::exit(2);
-    }
+    let source = match source {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::exit(2);
+        }
+    };
     let r = inspect(&source);
     if config.json {
         println!("{{\"bytes\":{},\"lines\":{},\"functions\":{},\"tests\":{},\"unsafe_mentions\":{},\"unwraps\":{},\"todos\":{}}}", r.bytes, r.lines, r.functions, r.tests, r.unsafe_mentions, r.unwraps, r.todos);
@@ -52,6 +53,17 @@ fn main() {
     if config.check && (r.functions == 0 || r.todos > todo_limit) {
         std::process::exit(1);
     }
+}
+fn read_limited<R: Read>(reader: R) -> Result<String, String> {
+    let mut bytes = Vec::with_capacity(MAX_INPUT_BYTES.min(8192));
+    reader
+        .take((MAX_INPUT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_INPUT_BYTES {
+        return Err(format!("input exceeds {} byte limit", MAX_INPUT_BYTES));
+    }
+    String::from_utf8(bytes).map_err(|_| "input is not valid UTF-8".into())
 }
 fn print_help() {
     println!(
@@ -169,5 +181,17 @@ mod tests {
         let report = inspect("fn main() {}\n// TODO\n// TODO\n");
         assert!(report.todos <= 2);
         assert_eq!(report.functions, 1);
+    }
+    #[test]
+    fn bounded_reader_accepts_exact_limit_and_rejects_over_limit() {
+        use std::io::Cursor;
+        assert_eq!(read_limited(Cursor::new(vec![b'x'; MAX_INPUT_BYTES])).unwrap().len(), MAX_INPUT_BYTES);
+        let error = read_limited(Cursor::new(vec![b'x'; MAX_INPUT_BYTES + 1])).unwrap_err();
+        assert!(error.contains("exceeds"));
+    }
+    #[test]
+    fn bounded_reader_rejects_invalid_utf8() {
+        use std::io::Cursor;
+        assert_eq!(read_limited(Cursor::new(vec![0xff])).unwrap_err(), "input is not valid UTF-8");
     }
 }
