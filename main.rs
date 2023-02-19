@@ -21,6 +21,7 @@ struct Config {
     check: bool,
     input: Option<String>,
     max_todos: Option<usize>,
+    show_todos: bool,
 }
 
 fn main() {
@@ -45,9 +46,24 @@ fn main() {
     };
     let r = inspect(&source);
     if config.json {
-        println!("{{\"bytes\":{},\"lines\":{},\"functions\":{},\"tests\":{},\"unsafe_mentions\":{},\"unwraps\":{},\"todos\":{}}}", r.bytes, r.lines, r.functions, r.tests, r.unsafe_mentions, r.unwraps, r.todos);
+        print!("{{\"bytes\":{},\"lines\":{},\"functions\":{},\"tests\":{},\"unsafe_mentions\":{},\"unwraps\":{},\"todos\":{}", r.bytes, r.lines, r.functions, r.tests, r.unsafe_mentions, r.unwraps, r.todos);
+        if config.show_todos {
+            print!(",\"todo_lines\":[");
+            for (index, (line, text)) in todo_lines(&source).iter().enumerate() {
+                if index > 0 { print!(","); }
+                print!("{{\"line\":{},\"text\":\"{}\"}}", line, json_escape(text));
+            }
+            print!("]");
+        }
+        println!("}}");
     } else {
         report(&r);
+        if config.show_todos {
+            println!("\nTODO lines:");
+            let lines = todo_lines(&source);
+            if lines.is_empty() { println!("  (none)"); }
+            for (line, text) in lines { println!("  {line}: {text}"); }
+        }
     }
     let todo_limit = config.max_todos.unwrap_or(0);
     if config.check && (r.functions == 0 || r.todos > todo_limit) {
@@ -72,13 +88,14 @@ fn print_help() {
     );
 }
 fn usage() -> &'static str {
-    "usage: is-this-rust-yet [--json] [--check] [--max-todos N] [FILE|-]"
+    "usage: is-this-rust-yet [--json] [--check] [--max-todos N] [--show-todos] [FILE|-]"
 }
 fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut json = false;
     let mut check = false;
     let mut input = None;
     let mut max_todos = None;
+    let mut show_todos = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -89,6 +106,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             }
             "--json" => json = true,
             "--check" => check = true,
+            "--show-todos" => show_todos = true,
             "--max-todos" => {
                 i += 1;
                 if i == args.len() { return Err("--max-todos requires N".into()); }
@@ -110,7 +128,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         i += 1;
     }
     if max_todos.is_some() && !check { return Err("--max-todos requires --check".into()); }
-    Ok(Config { json, check, input, max_todos })
+    Ok(Config { json, check, input, max_todos, show_todos })
 }
 fn mark(ok: bool) -> &'static str {
     if ok {
@@ -129,6 +147,29 @@ fn inspect(source: &str) -> Report {
         unwraps: source.matches("unwrap").count(),
         todos: source.matches("TODO").count(),
     }
+}
+fn todo_lines(source: &str) -> Vec<(usize, String)> {
+    source.lines().enumerate().filter_map(|(index, line)| {
+        let text = line.strip_suffix('\r').unwrap_or(line);
+        text.contains("TODO").then(|| (index + 1, text.to_string()))
+    }).collect()
+}
+fn json_escape(text: &str) -> String {
+    let mut escaped = String::new();
+    for ch in text.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{08}' => escaped.push_str("\\b"),
+            '\u{0c}' => escaped.push_str("\\f"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
 fn report(r: &Report) {
     println!("Is this Rust yet? tiny source-text inspection\n\nbytes: {}\nlines: {}\nfunctions: {}\ntests: {}\nunsafe mentions: {}\nunwrap mentions: {}\nTODOs: {}\n\nchecklist:\n  {} fn keyword(s): the compiler may recognize a function\n  {} test attribute(s): future-you has backup\n  {} TODO(s): the 2020 lockdown backlog lives\n  {} no unsafe mention: borrow checker vibes are pending\n\nverdict: {}", r.bytes, r.lines, r.functions, r.tests, r.unsafe_mentions, r.unwraps, r.todos, mark(r.functions > 0), mark(r.tests > 0), mark(r.todos > 0), mark(r.unsafe_mentions == 0), if r.functions > 0 { "Rust-shaped. Please ask rustc before ordering a commemorative hoodie." } else { "Rust-adjacent. It may be a README wearing a trench coat." });
@@ -160,7 +201,7 @@ mod tests {
         let args = vec!["file.rs".into(), "--check".into(), "--json".into()];
         assert_eq!(
             parse_args(&args).unwrap(),
-            Config { json: true, check: true, input: Some("file.rs".into()), max_todos: None }
+            Config { json: true, check: true, input: Some("file.rs".into()), max_todos: None, show_todos: false }
         );
     }
     #[test]
@@ -193,5 +234,14 @@ mod tests {
     fn bounded_reader_rejects_invalid_utf8() {
         use std::io::Cursor;
         assert_eq!(read_limited(Cursor::new(vec![0xff])).unwrap_err(), "input is not valid UTF-8");
+    }
+    #[test]
+    fn todo_lines_are_numbered_and_strip_crlf_separator() {
+        assert_eq!(todo_lines("one\r\n// TODO: \"ship\"\r\nthree\nTODO 🦀"), vec![(2, "// TODO: \"ship\"".into()), (4, "TODO 🦀".into())]);
+        assert!(todo_lines("clean\n").is_empty());
+    }
+    #[test]
+    fn json_escape_handles_quotes_backslashes_and_controls() {
+        assert_eq!(json_escape("a\"\\\t\n"), "a\\\"\\\\\\t\\n");
     }
 }
